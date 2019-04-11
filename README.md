@@ -1,6 +1,6 @@
 # JobStack
 
-This library provides stack implementation for long running or otherwise expensive processing jobs. As a
+This library provides a stack implementation for long running or otherwise expensive processing jobs. As a
 special case, it implements the standard http.Handler in addition to the generic interface.
 
 ## Mechanism
@@ -24,18 +24,27 @@ setting the maximum stack size, or a timeout for the jobs, or both.
 
 		defer stack.Close()
 
+		d := newCounter()
+		to := newCounter()
+		var wg sync.WaitGroup
+		wg.Add(len(jobs))
 		for _, j := range jobs {
 			go func(j func()) {
 				err := stack.Do(j)
 				switch err {
 				case jobstack.ErrStackFull:
-					dropped++
+					d.inc()
 				case jobstack.ErrTimeout:
-					timedOut++
+					to.inc()
 				}
+
+				wg.Done()
 			}(j)
 		}
 
+		wg.Wait()
+		dropped = d.value()
+		timedOut = to.value()
 		return
 	}
 

@@ -36,7 +36,7 @@ type Options struct {
 // are set. When MaxStackSize is reached, the oldest job is dropped.
 //
 // Using a stack for job processing can be a good way to protect an application from
-// bursts of chatty clients or temporarily slow job processing.
+// bursts of chatty clients or temporarily slow job execution.
 type Stack struct {
 	options Options
 	stack   *stack
