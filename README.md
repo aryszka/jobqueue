@@ -1,7 +1,7 @@
 # JobStack
 
 This library provides stack implementation for long running or otherwise expensive processing jobs. As a
-special, it implements the standard http.Handler in addition to the generic interface.
+special case, it implements the standard http.Handler in addition to the generic interface.
 
 ## Mechanism
 
@@ -10,8 +10,8 @@ limit is exceeded. The default concurrency limit is 1. It is important to note, 
 individual goroutines for each job, the jobs have to have their own goroutines and the stack should be called
 from those.
 
-Besides limiting the concurrency level, it is also possible to limit the pending number of pending jobs, either
-by setting the maximum stack size or a timeout for the jobs.
+Besides limiting the concurrency level, it is also possible to limit the number of pending jobs, either by
+setting the maximum stack size, or a timeout for the jobs, or both.
 
 ## Example
 
@@ -22,7 +22,7 @@ by setting the maximum stack size or a timeout for the jobs.
 			Timeout:        9 * time.Millisecond,
 		})
 
-		for _, j := range j {
+		for _, j := range jobs {
 			go func(j func()) {
 				err := stack.Do(j)
 				switch err {
@@ -31,8 +31,10 @@ by setting the maximum stack size or a timeout for the jobs.
 				case jobstack.ErrTimeout:
 					timedOut++
 				}
-			}()
+			}(j)
 		}
+
+		return
 	}
 
 ## Two-step example
