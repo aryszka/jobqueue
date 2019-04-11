@@ -25,9 +25,6 @@ func (c *jobCounter) do(d time.Duration) {
 		c.mx.Lock()
 		defer c.mx.Unlock()
 		c.activeJobs--
-		if c.activeJobs > c.maxJobs {
-			c.maxJobs = c.activeJobs
-		}
 	}()
 
 	time.Sleep(d)

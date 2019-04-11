@@ -22,6 +22,8 @@ setting the maximum stack size, or a timeout for the jobs, or both.
 			Timeout:        9 * time.Millisecond,
 		})
 
+		defer stack.Close()
+
 		for _, j := range jobs {
 			go func(j func()) {
 				err := stack.Do(j)

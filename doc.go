@@ -23,6 +23,8 @@ Example
 			Timeout:        9 * time.Millisecond,
 		})
 
+		defer stack.Close()
+
 		for _, j := range jobs {
 			go func(j func()) {
 				err := stack.Do(j)
