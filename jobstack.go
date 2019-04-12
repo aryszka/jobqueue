@@ -24,7 +24,7 @@ type Options struct {
 	MaxStackSize int
 
 	// Timeout defines how long a job can be waiting in the stack.
-	// Defaults to
+	// Defaults to infinite.
 	Timeout time.Duration
 }
 
