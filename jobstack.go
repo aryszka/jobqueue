@@ -129,18 +129,18 @@ func (s *Stack) newJob() *job {
 	return j
 }
 
-// Ready returns when a job can be processed, or it should be cancelled. The notion of
+// Wait returns when a job can be processed, or it should be cancelled. The notion of
 // the actual 'job' to be processed is completely up to the calling code.
 //
-// When a job can be processed, Ready returns a non-nil done() function, which must be
+// When a job can be processed, Wait returns a non-nil done() function, which must be
 // called after the job was done, in order to free-up a slot for the next job.
 //
-// When the job needs to be droppped, Ready returns ErrStackFull. When the job timed out,
-// Ready returns ErrTimeout. In these cases, done() must not be called, and it may be
+// When the job needs to be droppped, Wait returns ErrStackFull. When the job timed out,
+// Wait returns ErrTimeout. In these cases, done() must not be called, and it may be
 // nil.
 //
-// Ready doesn't return other errors than ErrStackFull or ErrTimeout.
-func (s *Stack) Ready() (done func(), err error) {
+// Wait doesn't return other errors than ErrStackFull or ErrTimeout.
+func (s *Stack) Wait() (done func(), err error) {
 	j := s.newJob()
 	s.req <- j
 	err = <-j.notify
@@ -156,7 +156,7 @@ func (s *Stack) Ready() (done func(), err error) {
 //
 // Once the job has been started, Do does not return an error.
 func (s *Stack) Do(job func()) error {
-	done, err := s.Ready()
+	done, err := s.Wait()
 	if err != nil {
 		return err
 	}

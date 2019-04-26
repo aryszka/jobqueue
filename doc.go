@@ -52,7 +52,7 @@ Example
 Two-step example
 
 	func processInSharedStack(s *jobqueue.Stack, job func()) error {
-		done, err := s.Ready()
+		done, err := s.Wait()
 		if err != nil {
 			return err
 		}
