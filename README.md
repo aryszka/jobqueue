@@ -16,7 +16,7 @@ setting the maximum stack size, or a timeout for the jobs, or both.
 ## Example
 
 	func processJobs(jobs []func()) (dropped, timedOut int) {
-		stack := jobstack.With(Options{
+		stack := jobqueue.With(Options{
 			MaxConcurrency: 256,
 			MaxStackSize:   256 * 256,
 			Timeout:        9 * time.Millisecond,
@@ -32,9 +32,9 @@ setting the maximum stack size, or a timeout for the jobs, or both.
 			go func(j func()) {
 				err := stack.Do(j)
 				switch err {
-				case jobstack.ErrStackFull:
+				case jobqueue.ErrStackFull:
 					d.inc()
-				case jobstack.ErrTimeout:
+				case jobqueue.ErrTimeout:
 					to.inc()
 				}
 
@@ -50,7 +50,7 @@ setting the maximum stack size, or a timeout for the jobs, or both.
 
 ## Two-step example
 
-	func processInSharedStack(s *jobstack.Stack, job func()) error {
+	func processInSharedStack(s *jobqueue.Stack, job func()) error {
 		done, err := s.Ready()
 		if err != nil {
 			return err

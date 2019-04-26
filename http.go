@@ -1,4 +1,4 @@
-package jobstack
+package jobqueue
 
 import "net/http"
 

@@ -27,4 +27,4 @@ doc.go: README.md
 	@echo '/*' > doc.go
 	@sed 's/^#* //' < README.md >> doc.go
 	@echo '*/' >> doc.go
-	@echo package jobstack >> doc.go
+	@echo package jobqueue >> doc.go
