@@ -1,3 +1,5 @@
+.PHONY: .coverprofile
+
 default: build
 
 build:
