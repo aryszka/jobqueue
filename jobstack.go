@@ -170,3 +170,16 @@ func (s *Stack) Do(job func()) error {
 func (s *Stack) Close() {
 	close(s.quit)
 }
+
+// MoveTo moves all stacks from the current to the new stack. The
+// current stack should be already closed.
+func (s *Stack) MoveTo(newStack *Stack) {
+	for s.busy > 0 && newStack.busy < newStack.stack.cap {
+		j := s.stack.pop()
+		s.busy--
+		if j != nil {
+			newStack.stack.push(j)
+			newStack.busy++
+		}
+	}
+}
