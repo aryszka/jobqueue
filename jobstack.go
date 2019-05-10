@@ -97,10 +97,9 @@ func (s *Stack) run() {
 				j.notify <- nil
 			} else {
 				if s.stack.full() {
-					oldest := s.stack.shift()
-					oldest.notify <- ErrStackFull
+					j.notify <- ErrStackFull
+					continue
 				}
-
 				s.stack.push(j)
 			}
 		case <-s.done:
