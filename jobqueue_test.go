@@ -155,3 +155,60 @@ func TestCancel(t *testing.T) {
 		}
 	})
 }
+
+func TestTeardown(t *testing.T) {
+	t.Run("call after closed", func(t *testing.T) {
+		t.Run("immediately", func(t *testing.T) {
+			q := New()
+			q.Close() // we don't which happens first ¯\_(ツ)_/¯
+			_, err := q.Wait()
+			if err != ErrClosed {
+				t.Fail()
+			}
+		})
+
+		t.Run("quit first for sure", func(t *testing.T) {
+			q := New()
+			q.Close()
+			<-q.hasQuit
+			_, err := q.Wait()
+			if err != ErrClosed {
+				t.Fail()
+			}
+		})
+	})
+
+	t.Run("cleanup the queue", func(t *testing.T) {
+		q := With(Options{})
+		q.Wait()
+		done := make(chan struct{})
+		go func() {
+			_, err := q.Wait()
+			if err != ErrClosed {
+				t.Error("expected closed error")
+			}
+
+			close(done)
+		}()
+
+		var s Status
+		for ; s.Queued == 0; s = q.Status() {
+		}
+
+		q.Close()
+		<-q.hasQuit
+		<-done
+	})
+
+	t.Run("done ignored after closed", func(t *testing.T) {
+		q := With(Options{})
+		done, err := q.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		q.Close()
+		<-q.hasQuit
+		done()
+	})
+}

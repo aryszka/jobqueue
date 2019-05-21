@@ -28,6 +28,16 @@ type Options struct {
 	Timeout time.Duration
 }
 
+// Status contains snapshot information about the state of the queue.
+type Status struct {
+
+	// Active contains the number of jobs being executed.
+	Active int
+
+	// Queued contains the number of jobs waiting to be scheduled.
+	Queued int
+}
+
 // Stack controls how long running or otherwise expensive jobs are executed. It allows
 // the jobs to proceed with limited concurrency. The incoming jobs are executed in LIFO
 // style (Last-in-first-out).
@@ -43,6 +53,8 @@ type Stack struct {
 	req     chan *job
 	done    chan struct{}
 	quit    chan struct{}
+	status  chan chan Status
+	hasQuit chan struct{} // for testing
 	busy    int
 }
 
@@ -54,6 +66,10 @@ var (
 
 	// ErrTimeout is returned by the stack when a pending job reached the timeout.
 	ErrTimeout = errors.New("timeout")
+
+	// ErrClosed is returned by the queue when called after the queue was closed, or when the
+	// queue was closed while a job was waiting to be scheduled.
+	ErrClosed = errors.New("queue closed")
 )
 
 // New creates a Stack instance with a concurrency level of 1, and with infinite stack
@@ -76,6 +92,8 @@ func With(o Options) *Stack {
 		req:     make(chan *job),
 		done:    make(chan struct{}),
 		quit:    make(chan struct{}),
+		hasQuit: make(chan struct{}),
+		status:  make(chan chan Status),
 	}
 
 	go s.run()
@@ -113,8 +131,15 @@ func (s *Stack) run() {
 		case <-timeout:
 			oldest.notify <- ErrTimeout
 			s.stack.shift()
+		case statusRequest := <-s.status:
+			statusRequest <- Status{Active: s.busy, Queued: s.stack.list.Len()}
 		case <-s.quit:
-			// TODO: teardown
+			for !s.stack.empty() {
+				j := s.stack.shift()
+				j.notify <- ErrClosed
+			}
+
+			close(s.hasQuit)
 			return
 		}
 	}
@@ -141,10 +166,24 @@ func (s *Stack) newJob() *job {
 //
 // Wait doesn't return other errors than ErrStackFull or ErrTimeout.
 func (s *Stack) Wait() (done func(), err error) {
+	select {
+	case <-s.quit:
+		err = ErrClosed
+		return
+	default:
+	}
+
 	j := s.newJob()
 	s.req <- j
 	err = <-j.notify
-	done = func() { s.done <- token }
+
+	done = func() {
+		select {
+		case s.done <- token:
+		case <-s.quit:
+		}
+	}
+
 	return
 }
 
@@ -164,6 +203,13 @@ func (s *Stack) Do(job func()) error {
 	job()
 	done()
 	return nil
+}
+
+// Status returns snapshot information about the state of the queue.
+func (s *Stack) Status() Status {
+	req := make(chan Status)
+	s.status <- req
+	return <-req
 }
 
 // Close frees up the resources used by a Stack instance.
