@@ -53,8 +53,9 @@ type Stack struct {
 	req     chan *job
 	done    chan struct{}
 	quit    chan struct{}
+	closing bool
 	status  chan chan Status
-	hasQuit chan struct{} // for testing
+	hasQuit chan struct{}
 	busy    int
 }
 
@@ -110,7 +111,9 @@ func (s *Stack) run() {
 
 		select {
 		case j := <-s.req:
-			if s.busy < s.options.MaxConcurrency {
+			if s.closing {
+				j.notify <- ErrClosed
+			} else if s.busy < s.options.MaxConcurrency {
 				s.busy++
 				j.notify <- nil
 			} else {
@@ -128,19 +131,24 @@ func (s *Stack) run() {
 				j := s.stack.pop()
 				j.notify <- nil
 			}
+
+			if s.closing && s.busy == 0 && s.stack.empty() {
+				close(s.hasQuit)
+				return
+			}
 		case <-timeout:
 			oldest.notify <- ErrTimeout
 			s.stack.shift()
-		case statusRequest := <-s.status:
-			statusRequest <- Status{Active: s.busy, Queued: s.stack.list.Len()}
+		case status := <-s.status:
+			status <- Status{Active: s.busy, Queued: s.stack.list.Len()}
 		case <-s.quit:
-			for !s.stack.empty() {
-				j := s.stack.shift()
-				j.notify <- ErrClosed
+			s.closing = true
+			if s.busy == 0 && s.stack.empty() {
+				close(s.hasQuit)
+				return
 			}
 
-			close(s.hasQuit)
-			return
+			// need a close timeout
 		}
 	}
 }
@@ -166,22 +174,20 @@ func (s *Stack) newJob() *job {
 //
 // Wait doesn't return other errors than ErrStackFull or ErrTimeout.
 func (s *Stack) Wait() (done func(), err error) {
-	select {
-	case <-s.quit:
-		err = ErrClosed
-		return
-	default:
-	}
-
 	j := s.newJob()
-	s.req <- j
-	err = <-j.notify
-
-	done = func() {
-		select {
-		case s.done <- token:
-		case <-s.quit:
+	select {
+	case s.req <- j:
+		err = <-j.notify
+		if err == nil {
+			done = func() {
+				select {
+				case s.done <- token:
+				case <-s.hasQuit:
+				}
+			}
 		}
+	case <-s.hasQuit:
+		err = ErrClosed
 	}
 
 	return
@@ -208,11 +214,19 @@ func (s *Stack) Do(job func()) error {
 // Status returns snapshot information about the state of the queue.
 func (s *Stack) Status() Status {
 	req := make(chan Status)
-	s.status <- req
-	return <-req
+	select {
+	case <-s.hasQuit:
+		return Status{}
+	case s.status <- req:
+		return <-req
+	}
+
 }
 
 // Close frees up the resources used by a Stack instance.
 func (s *Stack) Close() {
-	close(s.quit)
+	select {
+	case <-s.hasQuit:
+	case s.quit <- token:
+	}
 }

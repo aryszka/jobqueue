@@ -158,57 +158,55 @@ func TestCancel(t *testing.T) {
 
 func TestTeardown(t *testing.T) {
 	t.Run("call after closed", func(t *testing.T) {
-		t.Run("immediately", func(t *testing.T) {
-			q := New()
-			q.Close() // we don't which happens first ¯\_(ツ)_/¯
-			_, err := q.Wait()
-			if err != ErrClosed {
-				t.Fail()
-			}
-		})
-
-		t.Run("quit first for sure", func(t *testing.T) {
-			q := New()
-			q.Close()
-			<-q.hasQuit
-			_, err := q.Wait()
-			if err != ErrClosed {
-				t.Fail()
-			}
-		})
-	})
-
-	t.Run("cleanup the queue", func(t *testing.T) {
-		q := With(Options{})
-		q.Wait()
-		done := make(chan struct{})
-		go func() {
-			_, err := q.Wait()
-			if err != ErrClosed {
-				t.Error("expected closed error")
-			}
-
-			close(done)
-		}()
-
-		var s Status
-		for ; s.Queued == 0; s = q.Status() {
-		}
-
+		q := New()
 		q.Close()
 		<-q.hasQuit
-		<-done
+		_, err := q.Wait()
+		if err != ErrClosed {
+			t.Fail()
+		}
 	})
 
-	t.Run("done ignored after closed", func(t *testing.T) {
-		q := With(Options{})
+	t.Run("call after closed while busy", func(t *testing.T) {
+		q := New()
 		done, err := q.Wait()
 		if err != nil {
 			t.Fatal(err)
 		}
 
+		defer done()
 		q.Close()
+		_, err = q.Wait()
+		if err != ErrClosed {
+			t.Error("failed to report closed")
+		}
+	})
+
+	t.Run("jobs get processed", func(t *testing.T) {
+		q := New()
+		completeJobs := make(chan struct{})
+		for i := 0; i < 3; i++ {
+			go func() {
+				done, err := q.Wait()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+
+				<-completeJobs
+				done()
+			}()
+		}
+
+		for {
+			s := q.Status()
+			if s.Active + s.Queued == 3 {
+				break
+			}
+		}
+
+		q.Close()
+		close(completeJobs)
 		<-q.hasQuit
-		done()
 	})
 }
