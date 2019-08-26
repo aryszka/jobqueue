@@ -209,6 +209,38 @@ func TestTeardown(t *testing.T) {
 		close(completeJobs)
 		<-q.hasQuit
 	})
+
+	t.Run("teardown timeout", func(t *testing.T) {
+		q := With(Options{CloseTimeout: 12 * time.Millisecond})
+
+		_, err := q.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var wg sync.WaitGroup
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func() {
+				_, err := q.Wait()
+				if err != ErrClosed {
+					t.Error("failed to fail with ErrClosed")
+				}
+
+				wg.Done()
+			}()
+		}
+
+		for {
+			s := q.Status()
+			if s.Active+s.Queued == 3 {
+				break
+			}
+		}
+
+		q.Close()
+		wg.Wait()
+	})
 }
 
 func TestForcedTeardown(t *testing.T) {

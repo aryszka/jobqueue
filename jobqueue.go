@@ -26,6 +26,8 @@ type Options struct {
 	// Timeout defines how long a job can be waiting in the stack.
 	// Defaults to infinite.
 	Timeout time.Duration
+
+	CloseTimeout time.Duration
 }
 
 // Status contains snapshot information about the state of the queue.
@@ -101,7 +103,15 @@ func With(o Options) *Stack {
 	return s
 }
 
+func (s *Stack) rejectQueued() {
+	for !s.stack.empty() {
+		j := s.stack.shift()
+		j.notify <- ErrClosed
+	}
+}
+
 func (s *Stack) run() {
+	var closeTimeout <-chan time.Time
 	for {
 		var timeout <-chan time.Time
 		oldest := s.stack.bottom()
@@ -143,11 +153,7 @@ func (s *Stack) run() {
 			status <- Status{Active: s.busy, Queued: s.stack.list.Len()}
 		case forced := <-s.quit:
 			if forced {
-				for !s.stack.empty() {
-					j := s.stack.shift()
-					j.notify <- ErrClosed
-				}
-
+				s.rejectQueued()
 				close(s.hasQuit)
 				return
 			}
@@ -158,7 +164,13 @@ func (s *Stack) run() {
 				return
 			}
 
-			// need a close timeout
+			if s.options.CloseTimeout > 0 {
+				closeTimeout = time.After(s.options.CloseTimeout)
+			}
+		case <-closeTimeout:
+			s.rejectQueued()
+			close(s.hasQuit)
+			return
 		}
 	}
 }
