@@ -208,7 +208,9 @@ func (s *Stack) Wait() (done func(), err error) {
 	select {
 	case s.req <- j:
 		err = <-j.notify
-		if err == nil {
+		if err != nil {
+			done = func() {}
+		} else {
 			done = func() {
 				select {
 				case s.done <- token:
@@ -256,10 +258,11 @@ func (s *Stack) Status() Status {
 // Close frees up the resources used by a Stack instance.
 //
 // After called, the queue stops accepting new jobs, but it waits until all the
-// jobs all done, including those waiting in the queue.
+// jobs are done, including those waiting in the queue.
 //
 // If the close timeout is set to >0, then forces closing after the timeout
 // has passed. If the timeout has passed, the queued jobs receive ErrClosed.
+// The close timeout can be set as an initialization option to the queue.
 func (s *Stack) Close() {
 	select {
 	case <-s.hasQuit:
