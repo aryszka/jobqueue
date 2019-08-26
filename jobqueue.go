@@ -27,6 +27,8 @@ type Options struct {
 	// Defaults to infinite.
 	Timeout time.Duration
 
+	// CloseTimeout sets a maximum duration for how long the queue can wait
+	// for the active and queued jobs to finish. Defaults to infinite.
 	CloseTimeout time.Duration
 }
 
@@ -34,10 +36,16 @@ type Options struct {
 type Status struct {
 
 	// Active contains the number of jobs being executed.
-	Active int
+	ActiveJobs int
 
 	// Queued contains the number of jobs waiting to be scheduled.
-	Queued int
+	QueuedJobs int
+
+	// Closing indicates that the queue is being closed.
+	Closing bool
+
+	// Closed indicates that the queues has been closed.
+	Closed bool
 }
 
 // Stack controls how long running or otherwise expensive jobs are executed. It allows
@@ -150,7 +158,7 @@ func (s *Stack) run() {
 			oldest.notify <- ErrTimeout
 			s.stack.shift()
 		case status := <-s.status:
-			status <- Status{Active: s.busy, Queued: s.stack.list.Len()}
+			status <- Status{ActiveJobs: s.busy, QueuedJobs: s.stack.list.Len(), Closing: s.closing}
 		case forced := <-s.quit:
 			if forced {
 				s.rejectQueued()
@@ -238,7 +246,7 @@ func (s *Stack) Status() Status {
 	req := make(chan Status)
 	select {
 	case <-s.hasQuit:
-		return Status{}
+		return Status{Closed: true}
 	case s.status <- req:
 		return <-req
 	}
@@ -246,6 +254,12 @@ func (s *Stack) Status() Status {
 }
 
 // Close frees up the resources used by a Stack instance.
+//
+// After called, the queue stops accepting new jobs, but it waits until all the
+// jobs all done, including those waiting in the queue.
+//
+// If the close timeout is set to >0, then forces closing after the timeout
+// has passed. If the timeout has passed, the queued jobs receive ErrClosed.
 func (s *Stack) Close() {
 	select {
 	case <-s.hasQuit:
@@ -253,6 +267,9 @@ func (s *Stack) Close() {
 	}
 }
 
+// CloseForced frees up the resources used by a Stack instance.
+//
+// When called, the queued jobs receive ErrClosed.
 func (s *Stack) CloseForced() {
 	select {
 	case <-s.hasQuit:

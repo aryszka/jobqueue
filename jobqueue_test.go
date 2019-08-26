@@ -200,7 +200,7 @@ func TestTeardown(t *testing.T) {
 
 		for {
 			s := q.Status()
-			if s.Active+s.Queued == 3 {
+			if s.ActiveJobs+s.QueuedJobs == 3 {
 				break
 			}
 		}
@@ -233,7 +233,7 @@ func TestTeardown(t *testing.T) {
 
 		for {
 			s := q.Status()
-			if s.Active+s.Queued == 3 {
+			if s.ActiveJobs+s.QueuedJobs == 3 {
 				break
 			}
 		}
@@ -267,7 +267,7 @@ func TestForcedTeardown(t *testing.T) {
 
 		for {
 			s := q.Status()
-			if s.Active+s.Queued == 3 {
+			if s.ActiveJobs+s.QueuedJobs == 3 {
 				break
 			}
 		}
@@ -311,7 +311,7 @@ func TestForcedTeardown(t *testing.T) {
 
 		for {
 			s := q.Status()
-			if s.Active+s.Queued == 3 {
+			if s.ActiveJobs+s.QueuedJobs == 3 {
 				break
 			}
 		}
@@ -343,7 +343,7 @@ func TestStatus(t *testing.T) {
 
 		for {
 			s := q.Status()
-			if s.Active == 1 && s.Queued == 2 {
+			if s.ActiveJobs == 1 && s.QueuedJobs == 2 {
 				break
 			}
 		}
@@ -369,14 +369,14 @@ func TestStatus(t *testing.T) {
 
 		for {
 			s := q.Status()
-			if s.Active == 1 && s.Queued == 2 {
+			if s.ActiveJobs == 1 && s.QueuedJobs == 2 {
 				break
 			}
 		}
 
 		q.Close()
 		s := q.Status()
-		if s.Active != 1 || s.Queued != 2 {
+		if s.ActiveJobs != 1 || s.QueuedJobs != 2 {
 			t.Error("failed to report the right status")
 		}
 
@@ -401,7 +401,7 @@ func TestStatus(t *testing.T) {
 
 		for {
 			s := q.Status()
-			if s.Active == 1 && s.Queued == 2 {
+			if s.ActiveJobs == 1 && s.QueuedJobs == 2 {
 				break
 			}
 		}
@@ -410,7 +410,7 @@ func TestStatus(t *testing.T) {
 		close(completeJobs)
 		<-q.hasQuit
 		s := q.Status()
-		if s.Active+s.Queued != 0 {
+		if s.ActiveJobs+s.QueuedJobs != 0 {
 			t.Error("failed to report the right status")
 		}
 	})
