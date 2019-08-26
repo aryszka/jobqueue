@@ -322,3 +322,96 @@ func TestForcedTeardown(t *testing.T) {
 		wg.Wait()
 	})
 }
+
+func TestStatus(t *testing.T) {
+	t.Run("get status", func(t *testing.T) {
+		q := New()
+		defer q.Close()
+
+		completeJobs := make(chan struct{})
+		for i := 0; i < 3; i++ {
+			go func() {
+				done, err := q.Wait()
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				<-completeJobs
+				done()
+			}()
+		}
+
+		for {
+			s := q.Status()
+			if s.Active == 1 && s.Queued == 2 {
+				break
+			}
+		}
+
+		close(completeJobs)
+	})
+
+	t.Run("while closing", func(t *testing.T) {
+		q := New()
+
+		completeJobs := make(chan struct{})
+		for i := 0; i < 3; i++ {
+			go func() {
+				done, err := q.Wait()
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				<-completeJobs
+				done()
+			}()
+		}
+
+		for {
+			s := q.Status()
+			if s.Active == 1 && s.Queued == 2 {
+				break
+			}
+		}
+
+		q.Close()
+		s := q.Status()
+		if s.Active != 1 || s.Queued != 2 {
+			t.Error("failed to report the right status")
+		}
+
+		close(completeJobs)
+	})
+
+	t.Run("after closed", func(t *testing.T) {
+		q := New()
+
+		completeJobs := make(chan struct{})
+		for i := 0; i < 3; i++ {
+			go func() {
+				done, err := q.Wait()
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				<-completeJobs
+				done()
+			}()
+		}
+
+		for {
+			s := q.Status()
+			if s.Active == 1 && s.Queued == 2 {
+				break
+			}
+		}
+
+		q.Close()
+		close(completeJobs)
+		<-q.hasQuit
+		s := q.Status()
+		if s.Active+s.Queued != 0 {
+			t.Error("failed to report the right status")
+		}
+	})
+}
