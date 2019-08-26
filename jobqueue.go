@@ -52,7 +52,7 @@ type Stack struct {
 	stack   *stack
 	req     chan *job
 	done    chan struct{}
-	quit    chan struct{}
+	quit    chan bool
 	closing bool
 	status  chan chan Status
 	hasQuit chan struct{}
@@ -92,7 +92,7 @@ func With(o Options) *Stack {
 		stack:   newStack(o.MaxStackSize),
 		req:     make(chan *job),
 		done:    make(chan struct{}),
-		quit:    make(chan struct{}),
+		quit:    make(chan bool),
 		hasQuit: make(chan struct{}),
 		status:  make(chan chan Status),
 	}
@@ -141,7 +141,17 @@ func (s *Stack) run() {
 			s.stack.shift()
 		case status := <-s.status:
 			status <- Status{Active: s.busy, Queued: s.stack.list.Len()}
-		case <-s.quit:
+		case forced := <-s.quit:
+			if forced {
+				for !s.stack.empty() {
+					j := s.stack.shift()
+					j.notify <- ErrClosed
+				}
+
+				close(s.hasQuit)
+				return
+			}
+
 			s.closing = true
 			if s.busy == 0 && s.stack.empty() {
 				close(s.hasQuit)
@@ -227,6 +237,13 @@ func (s *Stack) Status() Status {
 func (s *Stack) Close() {
 	select {
 	case <-s.hasQuit:
-	case s.quit <- token:
+	case s.quit <- false:
+	}
+}
+
+func (s *Stack) CloseForced() {
+	select {
+	case <-s.hasQuit:
+	case s.quit <- true:
 	}
 }

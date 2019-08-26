@@ -200,7 +200,7 @@ func TestTeardown(t *testing.T) {
 
 		for {
 			s := q.Status()
-			if s.Active + s.Queued == 3 {
+			if s.Active+s.Queued == 3 {
 				break
 			}
 		}
@@ -208,5 +208,85 @@ func TestTeardown(t *testing.T) {
 		q.Close()
 		close(completeJobs)
 		<-q.hasQuit
+	})
+}
+
+func TestForcedTeardown(t *testing.T) {
+	t.Run("queued jobs get canceled", func(t *testing.T) {
+		q := New()
+
+		_, err := q.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var wg sync.WaitGroup
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func() {
+				_, err := q.Wait()
+				if err != ErrClosed {
+					t.Error("failed to fail with ErrClosed")
+				}
+
+				wg.Done()
+			}()
+		}
+
+		for {
+			s := q.Status()
+			if s.Active+s.Queued == 3 {
+				break
+			}
+		}
+
+		q.CloseForced()
+		wg.Wait()
+	})
+
+	t.Run("processed jobs done is a noop", func(t *testing.T) {
+		q := New()
+		done, err := q.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		q.CloseForced()
+		<-q.hasQuit
+		done()
+	})
+
+	t.Run("forced close after normal close", func(t *testing.T) {
+		q := New()
+
+		_, err := q.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var wg sync.WaitGroup
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func() {
+				_, err := q.Wait()
+				if err != ErrClosed {
+					t.Error("failed to fail with ErrClosed")
+				}
+
+				wg.Done()
+			}()
+		}
+
+		for {
+			s := q.Status()
+			if s.Active+s.Queued == 3 {
+				break
+			}
+		}
+
+		q.Close()
+		q.Status() // call status to make sure that we entered the control loop
+		q.CloseForced()
+		wg.Wait()
 	})
 }
