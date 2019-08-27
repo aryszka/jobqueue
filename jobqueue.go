@@ -26,6 +26,26 @@ type Options struct {
 	// Timeout defines how long a job can be waiting in the stack.
 	// Defaults to infinite.
 	Timeout time.Duration
+
+	// CloseTimeout sets a maximum duration for how long the queue can wait
+	// for the active and queued jobs to finish. Defaults to infinite.
+	CloseTimeout time.Duration
+}
+
+// Status contains snapshot information about the state of the queue.
+type Status struct {
+
+	// Active contains the number of jobs being executed.
+	ActiveJobs int
+
+	// Queued contains the number of jobs waiting to be scheduled.
+	QueuedJobs int
+
+	// Closing indicates that the queue is being closed.
+	Closing bool
+
+	// Closed indicates that the queues has been closed.
+	Closed bool
 }
 
 // Stack controls how long running or otherwise expensive jobs are executed. It allows
@@ -42,7 +62,10 @@ type Stack struct {
 	stack   *stack
 	req     chan *job
 	done    chan struct{}
-	quit    chan struct{}
+	quit    chan bool
+	closing bool
+	status  chan chan Status
+	hasQuit chan struct{}
 	busy    int
 }
 
@@ -54,6 +77,10 @@ var (
 
 	// ErrTimeout is returned by the stack when a pending job reached the timeout.
 	ErrTimeout = errors.New("timeout")
+
+	// ErrClosed is returned by the queue when called after the queue was closed, or when the
+	// queue was closed while a job was waiting to be scheduled.
+	ErrClosed = errors.New("queue closed")
 )
 
 // New creates a Stack instance with a concurrency level of 1, and with infinite stack
@@ -75,14 +102,24 @@ func With(o Options) *Stack {
 		stack:   newStack(o.MaxStackSize),
 		req:     make(chan *job),
 		done:    make(chan struct{}),
-		quit:    make(chan struct{}),
+		quit:    make(chan bool),
+		hasQuit: make(chan struct{}),
+		status:  make(chan chan Status),
 	}
 
 	go s.run()
 	return s
 }
 
+func (s *Stack) rejectQueued() {
+	for !s.stack.empty() {
+		j := s.stack.shift()
+		j.notify <- ErrClosed
+	}
+}
+
 func (s *Stack) run() {
+	var closeTimeout <-chan time.Time
 	for {
 		var timeout <-chan time.Time
 		oldest := s.stack.bottom()
@@ -92,7 +129,9 @@ func (s *Stack) run() {
 
 		select {
 		case j := <-s.req:
-			if s.busy < s.options.MaxConcurrency {
+			if s.closing {
+				j.notify <- ErrClosed
+			} else if s.busy < s.options.MaxConcurrency {
 				s.busy++
 				j.notify <- nil
 			} else {
@@ -110,11 +149,35 @@ func (s *Stack) run() {
 				j := s.stack.pop()
 				j.notify <- nil
 			}
+
+			if s.closing && s.busy == 0 && s.stack.empty() {
+				close(s.hasQuit)
+				return
+			}
 		case <-timeout:
 			oldest.notify <- ErrTimeout
 			s.stack.shift()
-		case <-s.quit:
-			// TODO: teardown
+		case status := <-s.status:
+			status <- Status{ActiveJobs: s.busy, QueuedJobs: s.stack.list.Len(), Closing: s.closing}
+		case forced := <-s.quit:
+			if forced {
+				s.rejectQueued()
+				close(s.hasQuit)
+				return
+			}
+
+			s.closing = true
+			if s.busy == 0 && s.stack.empty() {
+				close(s.hasQuit)
+				return
+			}
+
+			if s.options.CloseTimeout > 0 {
+				closeTimeout = time.After(s.options.CloseTimeout)
+			}
+		case <-closeTimeout:
+			s.rejectQueued()
+			close(s.hasQuit)
 			return
 		}
 	}
@@ -142,9 +205,23 @@ func (s *Stack) newJob() *job {
 // Wait doesn't return other errors than ErrStackFull or ErrTimeout.
 func (s *Stack) Wait() (done func(), err error) {
 	j := s.newJob()
-	s.req <- j
-	err = <-j.notify
-	done = func() { s.done <- token }
+	select {
+	case s.req <- j:
+		err = <-j.notify
+		if err != nil {
+			done = func() {}
+		} else {
+			done = func() {
+				select {
+				case s.done <- token:
+				case <-s.hasQuit:
+				}
+			}
+		}
+	case <-s.hasQuit:
+		err = ErrClosed
+	}
+
 	return
 }
 
@@ -166,7 +243,39 @@ func (s *Stack) Do(job func()) error {
 	return nil
 }
 
+// Status returns snapshot information about the state of the queue.
+func (s *Stack) Status() Status {
+	req := make(chan Status)
+	select {
+	case <-s.hasQuit:
+		return Status{Closed: true}
+	case s.status <- req:
+		return <-req
+	}
+
+}
+
 // Close frees up the resources used by a Stack instance.
+//
+// After called, the queue stops accepting new jobs, but it waits until all the
+// jobs are done, including those waiting in the queue.
+//
+// If the close timeout is set to >0, then forces closing after the timeout
+// has passed. If the timeout has passed, the queued jobs receive ErrClosed.
+// The close timeout can be set as an initialization option to the queue.
 func (s *Stack) Close() {
-	close(s.quit)
+	select {
+	case <-s.hasQuit:
+	case s.quit <- false:
+	}
+}
+
+// CloseForced frees up the resources used by a Stack instance.
+//
+// When called, the queued jobs receive ErrClosed.
+func (s *Stack) CloseForced() {
+	select {
+	case <-s.hasQuit:
+	case s.quit <- true:
+	}
 }
