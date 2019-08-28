@@ -58,16 +58,16 @@ type Status struct {
 // Using a stack for job processing can be a good way to protect an application from
 // bursts of chatty clients or temporarily slow job execution.
 type Stack struct {
-	options   Options
-	stack     *stack
-	req       chan *job
-	done      chan struct{}
-	quit      chan bool
-	closing   bool
-	status    chan chan Status
-	configure chan Options
-	hasQuit   chan struct{}
-	busy      int
+	options     Options
+	stack       *stack
+	req         chan *job
+	done        chan struct{}
+	quit        chan bool
+	closing     bool
+	status      chan chan Status
+	reconfigure chan Options
+	hasQuit     chan struct{}
+	busy        int
 }
 
 var token struct{}
@@ -99,14 +99,14 @@ func With(o Options) *Stack {
 	}
 
 	s := &Stack{
-		options:   o,
-		stack:     newStack(o.MaxStackSize),
-		req:       make(chan *job),
-		done:      make(chan struct{}),
-		quit:      make(chan bool),
-		hasQuit:   make(chan struct{}),
-		status:    make(chan chan Status),
-		configure: make(chan Options),
+		options:     o,
+		stack:       newStack(o.MaxStackSize),
+		req:         make(chan *job),
+		done:        make(chan struct{}),
+		quit:        make(chan bool),
+		hasQuit:     make(chan struct{}),
+		status:      make(chan chan Status),
+		reconfigure: make(chan Options),
 	}
 
 	go s.run()
@@ -165,7 +165,7 @@ func (s *Stack) run() {
 			s.stack.shift()
 		case status := <-s.status:
 			status <- Status{ActiveJobs: s.busy, QueuedJobs: s.stack.list.Len(), Closing: s.closing}
-		case o := <-s.configure:
+		case o := <-s.reconfigure:
 			if o.MaxConcurrency <= 0 {
 				o.MaxConcurrency = 1
 			}
@@ -278,7 +278,7 @@ func (s *Stack) Reconfigure(o Options) error {
 	select {
 	case <-s.hasQuit:
 		return ErrClosed
-	case s.configure <- o:
+	case s.reconfigure <- o:
 		return nil
 	}
 }
