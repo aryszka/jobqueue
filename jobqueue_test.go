@@ -32,7 +32,7 @@ func (c *jobCounter) do(d time.Duration) {
 
 func TestSingleJob(t *testing.T) {
 	w := With(Options{MaxConcurrency: 1, MaxStackSize: 1})
-	defer w.Close()
+	defer w.CloseForced()
 	if err := w.Do(func() {}); err != nil {
 		t.Error(err)
 	}
@@ -40,7 +40,7 @@ func TestSingleJob(t *testing.T) {
 
 func TestDefaultConcurrency(t *testing.T) {
 	w := New()
-	defer w.Close()
+	defer w.CloseForced()
 	if err := w.Do(func() {}); err != nil {
 		t.Error(err)
 	}
@@ -48,7 +48,7 @@ func TestDefaultConcurrency(t *testing.T) {
 
 func TestSetMaxConcurrency(t *testing.T) {
 	w := With(Options{MaxConcurrency: 3, MaxStackSize: 6})
-	defer w.Close()
+	defer w.CloseForced()
 	c := &jobCounter{}
 	var wg sync.WaitGroup
 	for i := 0; i < 6; i++ {
@@ -73,7 +73,7 @@ func TestSetMaxConcurrency(t *testing.T) {
 func TestCancel(t *testing.T) {
 	t.Run("stack full", func(t *testing.T) {
 		w := With(Options{MaxConcurrency: 3, MaxStackSize: 2})
-		defer w.Close()
+		defer w.CloseForced()
 		var wg sync.WaitGroup
 		results := make(chan error, 6)
 		wg.Add(6)
@@ -115,7 +115,7 @@ func TestCancel(t *testing.T) {
 
 	t.Run("timeout", func(t *testing.T) {
 		w := With(Options{Timeout: time.Millisecond})
-		defer w.Close()
+		defer w.CloseForced()
 		var wg sync.WaitGroup
 		results := make(chan error, 2)
 		wg.Add(2)
@@ -412,6 +412,102 @@ func TestStatus(t *testing.T) {
 		s := q.Status()
 		if s.ActiveJobs+s.QueuedJobs != 0 {
 			t.Error("failed to report the right status")
+		}
+	})
+}
+
+func TestReconfigure(t *testing.T) {
+	waitForStatus := func(t *testing.T, q *Stack, s Status) {
+		timeout := time.After(120 * time.Millisecond)
+		for {
+			if q.Status() == s {
+				return
+			}
+
+			select {
+			case <-timeout:
+				t.Fatal("failed to reach expected status")
+			default:
+			}
+		}
+	}
+
+	t.Run("apply changes", func(t *testing.T) {
+		for _, test := range []struct {
+			title       string
+			reconfigure Options
+			expect      Status
+		}{{
+			"keep concurrency, keep stack size",
+			Options{MaxConcurrency: 2, MaxStackSize: 2},
+			Status{ActiveJobs: 2, QueuedJobs: 2},
+		}, {
+			"keep concurrency, increase stack size",
+			Options{MaxConcurrency: 2, MaxStackSize: 3},
+			Status{ActiveJobs: 2, QueuedJobs: 2},
+		}, {
+			"keep concurrency, decrease stack size",
+			Options{MaxConcurrency: 2, MaxStackSize: 1},
+			Status{ActiveJobs: 2, QueuedJobs: 1},
+		}, {
+			"increase concurrency, keep stack size",
+			Options{MaxConcurrency: 3, MaxStackSize: 2},
+			Status{ActiveJobs: 3, QueuedJobs: 1},
+		}, {
+			"increase concurrency, increase stack size",
+			Options{MaxConcurrency: 3, MaxStackSize: 3},
+			Status{ActiveJobs: 3, QueuedJobs: 1},
+		}, {
+			"increase concurrency, decrease stack size",
+			Options{MaxConcurrency: 3, MaxStackSize: 1},
+			Status{ActiveJobs: 3, QueuedJobs: 1},
+		}, {
+			"decrease concurrency, keep stack size",
+			Options{MaxConcurrency: 1, MaxStackSize: 2},
+			Status{ActiveJobs: 2, QueuedJobs: 2},
+		}, {
+			"decrease concurrency, increase stack size",
+			Options{MaxConcurrency: 1, MaxStackSize: 3},
+			Status{ActiveJobs: 2, QueuedJobs: 2},
+		}, {
+			"decrease concurrency, decrease stack size",
+			Options{MaxConcurrency: 1, MaxStackSize: 1},
+			Status{ActiveJobs: 2, QueuedJobs: 1},
+		}} {
+			t.Run(test.title, func(t *testing.T) {
+				q := With(Options{MaxConcurrency: 2, MaxStackSize: 2})
+				defer q.CloseForced()
+
+				for i := 0; i < 4; i++ {
+					go q.Wait()
+				}
+
+				waitForStatus(t, q, Status{ActiveJobs: 2, QueuedJobs: 2})
+				if err := q.Reconfigure(test.reconfigure); err != nil {
+					t.Fatal(err)
+				}
+
+				waitForStatus(t, q, test.expect)
+			})
+		}
+	})
+
+	t.Run("use default concurrency", func(t *testing.T) {
+		q := With(Options{MaxConcurrency: 2, MaxStackSize: 2})
+		defer q.CloseForced()
+
+		q.Reconfigure(Options{MaxConcurrency: 0, MaxStackSize: 2})
+		go q.Wait()
+		go q.Wait()
+		waitForStatus(t, q, Status{ActiveJobs: 1, QueuedJobs: 1})
+	})
+
+	t.Run("reconfigure after closed", func(t *testing.T) {
+		q := New()
+		q.Close()
+		<-q.hasQuit
+		if err := q.Reconfigure(Options{}); err != ErrClosed {
+			t.Error("failed to fail")
 		}
 	})
 }
