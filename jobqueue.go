@@ -150,7 +150,7 @@ func (s *Stack) run() {
 			}
 		case <-s.done:
 			s.busy--
-			if !s.stack.empty() {
+			if !s.stack.empty() && s.busy < s.options.MaxConcurrency {
 				s.busy++
 				j := s.stack.pop()
 				j.notify <- nil
